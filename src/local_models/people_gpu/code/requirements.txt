@@ -1,0 +1,29 @@
+# Requirements for Enhanced People Counting System - Version 2
+# SageMaker ml.g4dn.xlarge Compatible
+# Model: people8s.pt (fixed)
+
+# Core ML/Computer Vision
+ultralytics>=8.2.0,<8.3.0        # YOLOv8 - stable version range
+opencv-python-headless>=4.8.0,<4.10.0    # Computer vision (headless for containers)
+torch>=2.0.0,<2.2.0              # PyTorch - stable range  
+torchvision>=0.15.0,<0.17.0      # Vision utilities
+
+# GPU monitoring - Use available version in SageMaker
+nvidia-ml-py3>=7.352.0,<8.0.0    # NVIDIA GPU monitoring - SageMaker compatible
+
+# Core Python dependencies  
+numpy>=1.21.0,<1.25.0            # Numerical computing
+Pillow>=9.0.0,<10.5.0            # Image processing
+boto3>=1.26.0,<2.0.0             # AWS CloudWatch integration
+
+# System monitoring
+psutil>=5.8.0,<6.0.0             # System resources
+
+# Additional dependencies for enhanced tracking
+scipy>=1.9.0,<1.12.0             # Scientific computing for Hungarian algorithm (optional)
+
+# Build tools
+setuptools>=65.0.0               # Package building
+wheel>=0.37.0                    # Wheel building
+
+# JSON handling (built-in json module used - no additional dependencies required)
