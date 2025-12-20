@@ -3,11 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.websocket.people_w_local import run_peoplecounting_detection
 
-
 from src.handlers.people_handler import people_websocket_handler
-
-
-
 
 from concurrent.futures import ThreadPoolExecutor
 
