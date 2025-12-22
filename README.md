@@ -13,7 +13,9 @@ once again chenging from ak
     "region": "us-east-1"
 }
 
-https://andymerry.s3.us-east-1.amazonaws.com/1191560-hd_1920_1080_25fps.mp4
+
+
+https://ai-search-video.s3.us-east-1.amazonaws.com/ai_search_videos/Vid.mp4
 
 
 

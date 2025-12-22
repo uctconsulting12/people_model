@@ -9,6 +9,7 @@ import base64
 import requests
 from concurrent.futures import ThreadPoolExecutor
 # from src.models.people_counting import people_counting
+from multiprocessing import Process, Queue
 
 from src.models.people_local import people_counting
 from src.store_s3.people_store import upload_to_s3
@@ -18,13 +19,36 @@ logger = logging.getLogger("people_counting")
 logger.setLevel(logging.INFO)
 
 
-# def  fetch_alert(org_id,user_id):
-#       try:
-#        response = requests.get(f"https://cctvaidemo.uctconsulting.com/alerts/check-user-define-alert-for-model?org_id={org_id}&user_id={user_id}&model_name=people_counting").content
-#        return response
+def run_storage_worker(q, client_id):
+    """
+    Runs in a SEPARATE PROCESS.
+    Handles S3 upload + DB insert.
+    """
 
-#       except Exception as e:
-#           return e
+    logger.info(f"[{client_id}] Storage worker started.")
+
+    while True:
+        item = q.get()
+
+        # Sentinel: exit
+        if item is None:
+            break
+
+        frame_id, annotated_frame, detections = item
+
+        try:
+            # Upload to S3
+            s3_url = upload_to_s3(annotated_frame, frame_id)
+
+            # DB insert
+            insert_people_counting(detections, s3_url)
+
+            logger.info(f"[{client_id}] Stored frame {frame_id}")
+
+        except Exception as e:
+            logger.error(f"[{client_id}] Error storing frame {frame_id}: {e}")
+
+    logger.info(f"[{client_id}] Storage worker exiting...")
     
 
 
@@ -52,6 +76,19 @@ def run_peoplecounting_detection(
         return
 
     frame_num = 0
+     # ---------------------------------------------------------
+    # START MULTIPROCESS STORAGE WORKER
+    # ---------------------------------------------------------
+    store_queue = Queue(maxsize=1000)
+
+    storage_process = Process(
+        target=run_storage_worker,
+        args=(store_queue, client_id),
+        daemon=True
+    )
+    storage_process.start()
+
+    logger.info(f"[{client_id}] Storage worker process started.")
 
     while cap.isOpened() and sessions.get(client_id, {}).get("streaming", False):
         ret, frame = cap.read()
@@ -90,16 +127,18 @@ def run_peoplecounting_detection(
                 #---------------- Background Storage ----------------
                 annotated_frame = detections.get("annotated_frame")
                 if annotated_frame is not None and frame_num % 20 == 0:
-                    def store_frame():
-                        try:
-                            s3_url = upload_to_s3(annotated_frame, frame_num)
-                            insert_people_counting(detections, s3_url)
-                            logger.info(f"[{client_id}] Frame {frame_num} stored successfully")
-                        except Exception as e:
-                            logger.error(f"[{client_id}] Frame {frame_num} store error -> {e}")
+                    if annotated_frame is not None:
+                        # JSON COPY to avoid race condition
+                        safe_copy = json.loads(json.dumps(detections))
 
-                    # Schedule S3/DB storage without blocking inference
-                    storage_executor.submit(store_frame)
+                        try:
+                            store_queue.put_nowait(
+                                (frame_num, annotated_frame, safe_copy)
+                            )
+                        except:
+                            logger.warning(
+                                f"[{client_id}] Storage queue full; frame {frame_num} dropped."
+                            )
 
             else:
                 if ws:
@@ -114,6 +153,10 @@ def run_peoplecounting_detection(
             logger.exception(f"[{client_id}] Frame {frame_num}: Pipeline error -> {e}")
 
     cap.release()
+    # STOP STORAGE PROCESS
+    store_queue.put(None)
+    storage_process.join(timeout=5)
+    
     if client_id in sessions:
         sessions[client_id]["streaming"] = False
 
