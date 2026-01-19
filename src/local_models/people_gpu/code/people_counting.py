@@ -128,13 +128,13 @@ def unix_to_iso(unix_timestamp: float) -> str:
 def seconds_to_hhmmss(seconds):
     """
     Convert seconds to HH:MM:SS format.
-    
+
     Args:
         seconds (float or int): Duration in seconds
-    
+
     Returns:
         str: Time in HH:MM:SS format (e.g., "00:05:30")
-    
+
     Examples:
         >>> seconds_to_hhmmss(5)
         "00:00:05"
@@ -146,7 +146,7 @@ def seconds_to_hhmmss(seconds):
         "23:59:59"  # Capped at maximum
         >>> seconds_to_hhmmss(-10)
         "00:00:00"  # Negative values become zero
-    
+
     Notes:
         - Negative values are clamped to 0
         - Values > 23:59:59 (86399 seconds) are capped at 23:59:59
@@ -155,19 +155,19 @@ def seconds_to_hhmmss(seconds):
     # Clamp negative values to zero
     if seconds < 0:
         seconds = 0
-    
+
     # Cap at 23:59:59 (86399 seconds)
     if seconds > 86399:
         seconds = 86399
-    
+
     # Convert to integer seconds
     total_seconds = int(seconds)
-    
+
     # Calculate hours, minutes, seconds
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
     secs = total_seconds % 60
-    
+
     # Return formatted string with zero-padding
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
@@ -248,6 +248,10 @@ class CameraPeopleCountingSystem:
             "critical_alert_active": False,  # Is critical alert currently active?
             "first_triggered_frame": None,  # Frame when critical alert first triggered
         }
+
+        # Top 10 dwell time tracking for 60-minute average
+        self.top_10_dwell = deque(maxlen=10)  # Stores top 10 dwell times from last 60 minutes
+        self.dwell_60_time = 0.0  # Mean of top_10_dwell (used when no people present)
 
         # Thread safety
         self._lock = threading.Lock()
@@ -411,7 +415,8 @@ class CameraPeopleCountingSystem:
                     try:
                         annotated = self._annotate_frame(frame, people, threshold,
                                                          metrics["occupancy_percentage"],
-                                                         metrics["status"])
+                                                         metrics["status"],
+                                                         metrics["avg_dwell_time"])
                         annotated_frame_b64 = self._frame_to_base64(annotated)
                     except Exception as e:
                         logger.debug(f"Annotation failed for camera {self.camera_id}: {e}")
@@ -428,7 +433,8 @@ class CameraPeopleCountingSystem:
                     "Entry_time": [p.get("entry_time_iso", "") for p in people],
                     "Exit_time": self._get_exit_times(),
                     "exitid": self._get_exit_ids(),
-                    "People_dwell_time": [p.get("dwell_time_hhmmss", "00:00:00") for p in people],  # NEW: HH:MM:SS array
+                    "People_dwell_time": [p.get("dwell_time_hhmmss", "00:00:00") for p in people],
+                    # NEW: HH:MM:SS array
                     "Confidence_scores": [p.get("confidence", 0.0) for p in people],
                     "Bounding_boxes": [p["bbox"] for p in people],
                     "x": coords["x"],
@@ -595,6 +601,15 @@ class CameraPeopleCountingSystem:
             self.exit_log.append(exit_record)
             self.recent_exits.append(exit_record)
 
+            # Add dwell time to top_10_dwell list (keeps last 10 automatically via maxlen)
+            self.top_10_dwell.append(dwell_time)
+
+            # Update dwell_60_time (mean of top 10)
+            if len(self.top_10_dwell) > 0:
+                self.dwell_60_time = sum(self.top_10_dwell) / len(self.top_10_dwell)
+                logger.info(f"Camera {self.camera_id}: ✅ UPDATED dwell_60_time = {self.dwell_60_time:.2f} "
+                            f"(top_10_dwell has {len(self.top_10_dwell)} items: {list(self.top_10_dwell)})")
+
             logger.info(f"Camera {self.camera_id}: Person {person_id} exited after "
                         f"{dwell_time:.1f}s (Total exits: {self.total_exits})")
 
@@ -671,8 +686,18 @@ class CameraPeopleCountingSystem:
         over_capacity_count = max(0, current_occupancy - threshold)
 
         # Calculate average dwell time
-        dwell_times = [p.get("dwell_time", 0.0) for p in people if p.get("dwell_time", 0.0) > 0]
-        avg_dwell_time = sum(dwell_times) / len(dwell_times) if dwell_times else 0.0
+        if len(people) > 0:
+            # People are present - calculate average of currently present people
+            dwell_times = [p.get("dwell_time", 0.0) for p in people if p.get("dwell_time", 0.0) > 0]
+            avg_dwell_time = sum(dwell_times) / len(dwell_times) if dwell_times else 0.0
+            logger.debug(f"Camera {self.camera_id}: 👥 People present ({len(people)}), "
+                         f"avg_dwell_time = {avg_dwell_time:.2f} (from current people)")
+        else:
+            # No people present - use dwell_60_time (mean of top 10 from last 60 minutes)
+            avg_dwell_time = self.dwell_60_time
+            logger.info(f"Camera {self.camera_id}: 📊 No people present, "
+                        f"avg_dwell_time = {avg_dwell_time:.2f} (from dwell_60_time, "
+                        f"top_10_dwell has {len(self.top_10_dwell)} items)")
 
         # ============= THRESHOLD CALCULATION =============
         alert_people = round(threshold * (alert_rate / 100.0))
@@ -808,7 +833,7 @@ class CameraPeopleCountingSystem:
 
     def _annotate_frame(self, frame: np.ndarray, people: List[Dict[str, Any]],
                         threshold: int, occupancy_percentage: float,
-                        status: str) -> np.ndarray:
+                        status: str, avg_dwell_time: float = 0.0) -> np.ndarray:
         """
         Annotate frame with simplified visual style.
 
@@ -818,6 +843,7 @@ class CameraPeopleCountingSystem:
             threshold (int): Maximum capacity
             occupancy_percentage (float): Current occupancy percentage
             status (str): Status field value ("High Occupancy" or "")
+            avg_dwell_time (float): Average dwell time in seconds (from metrics)
 
         Returns:
             np.ndarray: Annotated frame with:
@@ -839,7 +865,8 @@ class CameraPeopleCountingSystem:
         try:
             # Calculate metrics
             total_people = len(people)
-            avg_dwell_time = np.mean([p.get("dwell_time", 0.0) for p in people]) if people else 0.0
+            # Use the passed avg_dwell_time from metrics (includes dwell_60_time logic)
+            # NO LONGER calculating from people list here!
 
             # Convert average dwell time to HH:MM:SS format
             avg_dwell_hhmmss = seconds_to_hhmmss(avg_dwell_time)
