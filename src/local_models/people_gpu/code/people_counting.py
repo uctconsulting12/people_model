@@ -125,6 +125,53 @@ def unix_to_iso(unix_timestamp: float) -> str:
         return datetime.now(timezone.utc).isoformat()
 
 
+def seconds_to_hhmmss(seconds):
+    """
+    Convert seconds to HH:MM:SS format.
+    
+    Args:
+        seconds (float or int): Duration in seconds
+    
+    Returns:
+        str: Time in HH:MM:SS format (e.g., "00:05:30")
+    
+    Examples:
+        >>> seconds_to_hhmmss(5)
+        "00:00:05"
+        >>> seconds_to_hhmmss(90)
+        "00:01:30"
+        >>> seconds_to_hhmmss(3725)
+        "01:02:05"
+        >>> seconds_to_hhmmss(86400)
+        "23:59:59"  # Capped at maximum
+        >>> seconds_to_hhmmss(-10)
+        "00:00:00"  # Negative values become zero
+    
+    Notes:
+        - Negative values are clamped to 0
+        - Values > 23:59:59 (86399 seconds) are capped at 23:59:59
+        - Always returns zero-padded format (02d)
+    """
+    # Clamp negative values to zero
+    if seconds < 0:
+        seconds = 0
+    
+    # Cap at 23:59:59 (86399 seconds)
+    if seconds > 86399:
+        seconds = 86399
+    
+    # Convert to integer seconds
+    total_seconds = int(seconds)
+    
+    # Calculate hours, minutes, seconds
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    secs = total_seconds % 60
+    
+    # Return formatted string with zero-padding
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
 # ============================================================================
 # CAMERA PEOPLE COUNTING SYSTEM
 # ============================================================================
@@ -381,7 +428,7 @@ class CameraPeopleCountingSystem:
                     "Entry_time": [p.get("entry_time_iso", "") for p in people],
                     "Exit_time": self._get_exit_times(),
                     "exitid": self._get_exit_ids(),
-                    "People_dwell_time": [p.get("dwell_time", 0.0) for p in people],
+                    "People_dwell_time": [p.get("dwell_time_hhmmss", "00:00:00") for p in people],  # NEW: HH:MM:SS array
                     "Confidence_scores": [p.get("confidence", 0.0) for p in people],
                     "Bounding_boxes": [p["bbox"] for p in people],
                     "x": coords["x"],
@@ -394,7 +441,7 @@ class CameraPeopleCountingSystem:
                     "Net_count": metrics["net_count"],
                     "Occupancy_percentage": metrics["occupancy_percentage"],
                     "Over_capacity_count": metrics["over_capacity_count"],
-                    "Average_dwell_time": metrics["avg_dwell_time"],
+                    "Average_dwell_time": seconds_to_hhmmss(metrics["avg_dwell_time"]),  # NEW: HH:MM:SS string
                     "Max_occupancy": threshold,
                     "Status": metrics["status"],  # "High Occupancy" or ""
                     "is_alert_triggered": metrics["is_alert_triggered"],  # True for new alerts, False otherwise
@@ -434,7 +481,7 @@ class CameraPeopleCountingSystem:
                     "Net_count": max(0, self.total_entries - self.total_exits),
                     "Occupancy_percentage": 0.0,
                     "Over_capacity_count": 0,
-                    "Average_dwell_time": 0.0,
+                    "Average_dwell_time": "00:00:00",  # NEW: HH:MM:SS string
                     "Max_occupancy": threshold,
                     "Status": "Error",
                     "is_alert_triggered": False,
@@ -558,14 +605,15 @@ class CameraPeopleCountingSystem:
         for track_id, person_info in self.active_people.items():
             if track_id in tracks:
                 track = tracks[track_id]
-                dwell_time = current_time - person_info["entry_time"]
+                dwell_time_seconds = current_time - person_info["entry_time"]
                 people.append({
                     "id": person_info["id"],
                     "bbox": [track.bbox[0], track.bbox[1], track.bbox[2], track.bbox[3]],
                     "confidence": track.confidence,
                     "entry_time": person_info["entry_time"],
                     "entry_time_iso": unix_to_iso(person_info["entry_time"]),
-                    "dwell_time": dwell_time
+                    "dwell_time": dwell_time_seconds,  # Keep as float for calculations
+                    "dwell_time_hhmmss": seconds_to_hhmmss(dwell_time_seconds)  # NEW: HH:MM:SS string
                 })
 
         return people
@@ -793,6 +841,9 @@ class CameraPeopleCountingSystem:
             total_people = len(people)
             avg_dwell_time = np.mean([p.get("dwell_time", 0.0) for p in people]) if people else 0.0
 
+            # Convert average dwell time to HH:MM:SS format
+            avg_dwell_hhmmss = seconds_to_hhmmss(avg_dwell_time)
+
             # Determine if alert is active (based on status)
             is_alert = (status == "High Occupancy")
 
@@ -810,10 +861,10 @@ class CameraPeopleCountingSystem:
             cv2.rectangle(overlay, (10, 10), (450, overlay_height), (50, 50, 50), -1)
             cv2.addWeighted(overlay, 0.7, annotated, 0.3, 0, annotated)
 
-            # Info texts (removed Camera ID, combined Entry/Exit)
+            # Info texts with HH:MM:SS format and 60min window note
             info_texts = [
                 f"Total People: {total_people}",
-                f"Avg Dwell Time: {avg_dwell_time:.1f}s",
+                f"Avg Dwell Time (60min): {avg_dwell_hhmmss}",  # NEW: HH:MM:SS format with window indicator
                 f"Entry: {self.total_entries} | Exit: {self.total_exits}"
             ]
 
@@ -905,9 +956,9 @@ class CameraPeopleCountingSystem:
                     cv2.putText(annotated, id_text, (text_x, text_y),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, red_color, 2)
 
-                    # Deep blue timer (top of box)
+                    # Deep blue timer in HH:MM:SS format (top of box)
                     deep_blue = (139, 0, 0)
-                    timer_text = f"{dwell_time:.1f}s"
+                    timer_text = seconds_to_hhmmss(dwell_time)  # NEW: HH:MM:SS format
 
                     timer_y = max(y1 - 10, 25)
                     timer_x = x1
