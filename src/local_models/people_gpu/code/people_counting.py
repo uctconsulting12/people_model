@@ -406,8 +406,9 @@ class CameraPeopleCountingSystem:
                     people, threshold, alert_rate
                 )
 
-                # Step 6: Extract coordinates for response
-                coords = self._extract_coordinates(boxes, height, width)
+                # Step 6: Extract coordinates from TRACKED PEOPLE (FIXED)
+                coords = self._extract_coordinates(people, height, width)
+                logger.debug(f"Camera {self.camera_id}: Extracted coordinates from {len(people)} tracked people")
 
                 # Step 7: Generate annotated frame if requested
                 annotated_frame_b64 = None
@@ -454,6 +455,38 @@ class CameraPeopleCountingSystem:
                     "Processing_Status": 1,
                     "annotated_frame": annotated_frame_b64
                 }
+
+                # Validate data consistency (CRITICAL CHECKS)
+                try:
+                    assert len(response["People_ids"]) == len(response["x"]), \
+                        f"Mismatch: People_ids={len(response['People_ids'])}, x={len(response['x'])}"
+                    assert len(response["People_ids"]) == len(response["y"]), \
+                        f"Mismatch: People_ids={len(response['People_ids'])}, y={len(response['y'])}"
+                    assert len(response["People_ids"]) == len(response["w"]), \
+                        f"Mismatch: People_ids={len(response['People_ids'])}, w={len(response['w'])}"
+                    assert len(response["People_ids"]) == len(response["h"]), \
+                        f"Mismatch: People_ids={len(response['People_ids'])}, h={len(response['h'])}"
+                    assert len(response["People_ids"]) == len(response["Bounding_boxes"]), \
+                        f"Mismatch: People_ids={len(response['People_ids'])}, Bounding_boxes={len(response['Bounding_boxes'])}"
+                    assert len(response["People_ids"]) == len(response["Confidence_scores"]), \
+                        f"Mismatch: People_ids={len(response['People_ids'])}, Confidence_scores={len(response['Confidence_scores'])}"
+
+                    # Validate alert logic consistency
+                    if response["Current_occupancy"] == 0:
+                        assert response["Status"] == "", \
+                            f"Status should be empty with 0 occupancy, got '{response['Status']}'"
+                        assert response["is_alert_triggered"] == False, \
+                            f"is_alert_triggered should be False with 0 occupancy, got {response['is_alert_triggered']}"
+
+                    logger.debug(f"✅ Camera {self.camera_id}: Data consistency validation passed")
+
+                except AssertionError as e:
+                    logger.error(f"❌ Camera {self.camera_id}: DATA CONSISTENCY ERROR - {e}")
+                    logger.error(f"   People count: {len(people)}")
+                    logger.error(f"   Response arrays: People_ids={len(response['People_ids'])}, "
+                                 f"x={len(response['x'])}, y={len(response['y'])}, "
+                                 f"w={len(response['w'])}, h={len(response['h'])}")
+                    # Continue execution but log the error
 
                 logger.info(f"Camera {self.camera_id} Frame {self.frame_count}: {len(people)} people, "
                             f"occupancy: {metrics['occupancy_percentage']:.1f}%, "
@@ -705,9 +738,33 @@ class CameraPeopleCountingSystem:
         logger.debug(f"Camera {self.camera_id}: Alert threshold - "
                      f"{alert_people} people ({alert_rate}%)")
 
+        # ============= FIRST FRAME SKIP =============
+        # CRITICAL FIX: Skip alert logic on first frame (initialization frame)
+        if self.frame_count == 1:
+            logger.info(f"Camera {self.camera_id}: First frame - skipping alert logic (initialization)")
+            return {
+                "current_occupancy": current_occupancy,
+                "occupancy_percentage": round(occupancy_percentage, 1),
+                "over_capacity_count": over_capacity_count,
+                "avg_dwell_time": round(avg_dwell_time, 2),
+                "status": "",  # Always empty on first frame
+                "is_alert_triggered": False,  # Always false on first frame
+                "net_count": max(0, self.total_entries - self.total_exits),
+            }
+
+        # DEBUG: Log current state for troubleshooting
+        logger.debug(f"🔍 Camera {self.camera_id} Alert Debug:")
+        logger.debug(f"   Current occupancy: {current_occupancy} people")
+        logger.debug(f"   Threshold: {threshold} people")
+        logger.debug(f"   Alert rate: {alert_rate}%")
+        logger.debug(f"   Alert triggers at: {alert_people} people")
+        logger.debug(f"   Critical alert state: {self.critical_alert_state}")
+
         # ============= SIMPLIFIED ALERT LOGIC =============
         # Check if we're in alert condition
         is_in_alert_condition = current_occupancy >= alert_people
+
+        logger.debug(f"   Is in alert condition: {is_in_alert_condition} ({current_occupancy} >= {alert_people})")
 
         # Manage status and is_alert_triggered
         status = ""
@@ -761,12 +818,17 @@ class CameraPeopleCountingSystem:
             "net_count": max(0, self.total_entries - self.total_exits),
         }
 
-    def _extract_coordinates(self, boxes: List[List[float]], height: int, width: int) -> Dict[str, List[float]]:
+    def _extract_coordinates(self, people: List[Dict[str, Any]], height: int, width: int) -> Dict[str, List[float]]:
         """
-        Extract center coordinates and dimensions from bounding boxes.
+        Extract center coordinates and dimensions from TRACKED PEOPLE bounding boxes.
+
+        CRITICAL FIX: This method now extracts coordinates from tracked people,
+        not raw YOLO detections. This ensures consistency:
+        - If people=[], then x=[], y=[], w=[], h=[]
+        - If people=[3 people], then x=[3], y=[3], w=[3], h=[3]
 
         Args:
-            boxes (List[List[float]]): Bounding boxes [[x1, y1, x2, y2], ...]
+            people (List[Dict[str, Any]]): List of tracked people with 'bbox' key
             height (int): Frame height in pixels
             width (int): Frame width in pixels
 
@@ -782,9 +844,10 @@ class CameraPeopleCountingSystem:
         """
         coords = {"x": [], "y": [], "w": [], "h": []}
 
-        for box in boxes:
-            if len(box) >= 4:
-                x1, y1, x2, y2 = box
+        for person in people:
+            bbox = person.get("bbox", [])
+            if len(bbox) >= 4:
+                x1, y1, x2, y2 = bbox
 
                 # Calculate center and dimensions
                 center_x = (x1 + x2) / 2.0
