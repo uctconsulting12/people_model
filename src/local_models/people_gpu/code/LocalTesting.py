@@ -348,9 +348,9 @@ if __name__ == "__main__":
         print("\n📄 JSON OUTPUT MODE - Saving all frames to output.json")
         tester.test_video(
             VIDEO_PATH,
-            camid=1,
+            camid=2,
             threshold=10,
-            alert_rate=60,
+            alert_rate=70,
             return_annotated=False,  # Save to JSON
             confidence_threshold=0.35,
             max_frames=None  # Process all frames

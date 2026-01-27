@@ -1074,6 +1074,11 @@ def predict_fn(input_data: Dict[str, Any], model=None) -> Dict[str, Any]:
             confidence_threshold=confidence_threshold
         )
 
+        # Check if People_ids is empty and set Status to ""
+        if not result.get("People_ids", []):
+            result["Status"] = ""
+            logger.debug(f"Camera {camid}: People_ids is empty, Status set to ''")
+
         # Add performance metrics
         processing_time = (time.time() - start_time) * 1000
         gpu_stats = get_gpu_stats()

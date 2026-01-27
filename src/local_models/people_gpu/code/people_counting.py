@@ -738,20 +738,6 @@ class CameraPeopleCountingSystem:
         logger.debug(f"Camera {self.camera_id}: Alert threshold - "
                      f"{alert_people} people ({alert_rate}%)")
 
-        # ============= FIRST FRAME SKIP =============
-        # CRITICAL FIX: Skip alert logic on first frame (initialization frame)
-        if self.frame_count == 1:
-            logger.info(f"Camera {self.camera_id}: First frame - skipping alert logic (initialization)")
-            return {
-                "current_occupancy": current_occupancy,
-                "occupancy_percentage": round(occupancy_percentage, 1),
-                "over_capacity_count": over_capacity_count,
-                "avg_dwell_time": round(avg_dwell_time, 2),
-                "status": "",  # Always empty on first frame
-                "is_alert_triggered": False,  # Always false on first frame
-                "net_count": max(0, self.total_entries - self.total_exits),
-            }
-
         # DEBUG: Log current state for troubleshooting
         logger.debug(f"🔍 Camera {self.camera_id} Alert Debug:")
         logger.debug(f"   Current occupancy: {current_occupancy} people")
