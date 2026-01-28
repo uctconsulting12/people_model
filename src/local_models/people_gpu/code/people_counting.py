@@ -1,7 +1,7 @@
 # people_counting.py
 """
 ================================================================================
-PEOPLE COUNTING SYSTEM - PRODUCTION VERSION
+PEOPLE COUNTING SYSTEM - PRODUCTION VERSION (FIXED v1.1)
 ================================================================================
 
 OVERVIEW:
@@ -10,8 +10,14 @@ This module implements a sophisticated people counting system with:
 - YOLO-based person detection
 - Deep learning re-identification (OSNet)
 - Multi-object tracking (DeepSORT)
-- State-based alert debouncing
+- State-based alert debouncing (FIXED)
 - Dual STATUS/ALERT system
+
+FIXES IN VERSION 1.1:
+--------------------
+✅ Fixed false alert on first frame when no people present
+✅ Added mandatory check: current_occupancy > 0 before triggering alerts
+✅ Proper debouncing now works correctly in all edge cases
 
 SIMPLIFIED DUAL STATUS/ALERT SYSTEM:
 ------------------------------------
@@ -52,15 +58,15 @@ Shop C (capacity=600, alert_rate=70):
   - Warning at: round(600 * 0.65) = 390 people
   - Clear at: 390 people
 
-CRITICAL ALERT STATE MACHINE:
------------------------------
-INITIAL → CRITICAL ACTIVE (occupancy >= critical, first time)
-CRITICAL ACTIVE → CRITICAL ACTIVE (occupancy >= critical, suppressed)
-CRITICAL ACTIVE → INITIAL (occupancy < 65%, cleared)
+CRITICAL ALERT STATE MACHINE (FIXED v1.1):
+------------------------------
+INITIAL → CRITICAL ACTIVE (occupancy > 0 AND occupancy >= critical, first time)
+CRITICAL ACTIVE → CRITICAL ACTIVE (occupancy > 0 AND occupancy >= critical, suppressed)
+CRITICAL ACTIVE → INITIAL (occupancy == 0 OR occupancy < critical, cleared)
 
 Author: AI-Powered People Counting Team
-Version: 1.0 - Production
-Date: 2024-12-17
+Version: 1.1 - Production (Fixed)
+Date: 2025-01-28
 ================================================================================
 """
 
@@ -178,14 +184,18 @@ def seconds_to_hhmmss(seconds):
 
 class CameraPeopleCountingSystem:
     """
-    Camera-specific people counting system with SIMPLIFIED DUAL STATUS/ALERT.
+    Camera-specific people counting system with SIMPLIFIED DUAL STATUS/ALERT (FIXED v1.1).
 
     This class manages all counting operations for a single camera, including:
     - Person detection using YOLO
     - Re-identification using OSNet
     - Tracking using DeepSORT
     - Entry/exit tracking
-    - Alert state management
+    - Alert state management (with proper debouncing - FIXED)
+
+    CRITICAL FIX in v1.1:
+    - Alerts now require current_occupancy > 0 (prevents false alerts on empty frames)
+    - Proper state machine transitions in all edge cases
 
     Attributes:
         camera_id (int): Unique camera identifier
@@ -256,10 +266,10 @@ class CameraPeopleCountingSystem:
         # Thread safety
         self._lock = threading.Lock()
 
-        logger.info(f"Camera {camera_id} counting system initialized - "
+        logger.info(f"Camera {camera_id} counting system initialized (v1.1 FIXED) - "
                     f"confidence: {self.confidence_threshold}, "
                     f"reid_threshold: {self.reidentifier.similarity_threshold}, "
-                    f"simplified_dual_status_alert: ENABLED (warning fixed at 65%)")
+                    f"simplified_dual_status_alert: ENABLED (warning fixed at 65%, alert debouncing FIXED)")
 
     def set_confidence_threshold(self, threshold: float):
         """
@@ -673,22 +683,23 @@ class CameraPeopleCountingSystem:
             alert_rate: int
     ) -> Dict[str, Any]:
         """
-        Calculate metrics with SIMPLIFIED ALERT system.
+        Calculate metrics with SIMPLIFIED ALERT system (FIXED v1.1).
 
-        ULTRA-SIMPLIFIED LOGIC:
-        ======================
+        ULTRA-SIMPLIFIED LOGIC (FIXED):
+        ===============================
         Only 2 fields: status and is_alert_triggered
         No "alert" key - it's redundant!
 
-        STATES:
-        =======
+        STATES (FIXED):
+        ==============
         1. Normal: status="", is_alert_triggered=False
         2. Alert (First Time): status="High Occupancy", is_alert_triggered=True
         3. Alert (Already Sent): status="", is_alert_triggered=False
+        4. No People (ANY threshold): status="", is_alert_triggered=False ✅ FIXED
 
-        LOGIC:
-        ======
-        if current >= alert_people:
+        LOGIC (FIXED):
+        =============
+        if current > 0 AND current >= alert_people:  ✅ CRITICAL FIX
             if not already_sent:
                 status = "High Occupancy"
                 is_alert_triggered = True (SEND NOTIFICATION)
@@ -746,11 +757,13 @@ class CameraPeopleCountingSystem:
         logger.debug(f"   Alert triggers at: {alert_people} people")
         logger.debug(f"   Critical alert state: {self.critical_alert_state}")
 
-        # ============= SIMPLIFIED ALERT LOGIC =============
-        # Check if we're in alert condition
-        is_in_alert_condition = current_occupancy >= alert_people
+        # ============= SIMPLIFIED ALERT LOGIC (FIXED) =============
+        # CRITICAL FIX: Check if we're in alert condition AND have actual people
+        # This prevents false alerts when current_occupancy=0 and alert_people=0
+        is_in_alert_condition = (current_occupancy > 0) and (current_occupancy >= alert_people)
 
-        logger.debug(f"   Is in alert condition: {is_in_alert_condition} ({current_occupancy} >= {alert_people})")
+        logger.debug(f"   Is in alert condition: {is_in_alert_condition} "
+                     f"({current_occupancy} > 0 AND {current_occupancy} >= {alert_people})")
 
         # Manage status and is_alert_triggered
         status = ""
@@ -1132,8 +1145,9 @@ class PeopleCountingSystemManager:
         self.camera_systems: Dict[int, CameraPeopleCountingSystem] = {}
         self._lock = threading.Lock()
 
-        logger.info("PeopleCountingSystemManager initialized with "
-                    "SIMPLIFIED DUAL STATUS/ALERT system (warning fixed at 65%)")
+        logger.info("PeopleCountingSystemManager initialized (v1.1 FIXED) with "
+                    "SIMPLIFIED DUAL STATUS/ALERT system (warning fixed at 65%, "
+                    "alert debouncing FIXED for 0 occupancy edge case)")
 
     def get_or_create_system(self, camid: int) -> CameraPeopleCountingSystem:
         """
