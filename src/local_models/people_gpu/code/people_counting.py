@@ -898,28 +898,6 @@ class CameraPeopleCountingSystem:
                         status: str, avg_dwell_time: float = 0.0) -> np.ndarray:
         """
         Annotate frame with simplified visual style.
-
-        Args:
-            frame (np.ndarray): Original frame
-            people (List[Dict[str, Any]]): Detected people with bboxes
-            threshold (int): Maximum capacity
-            occupancy_percentage (float): Current occupancy percentage
-            status (str): Status field value ("High Occupancy" or "")
-            avg_dwell_time (float): Average dwell time in seconds (from metrics)
-
-        Returns:
-            np.ndarray: Annotated frame with:
-                - Deep green bounding boxes
-                - Red ID text (centered in box)
-                - Deep blue timer (top of box)
-                - Info panel with semi-transparent overlay
-                - Occupancy & Alert section with colored status box
-
-        STYLE:
-            - Bounding box: Deep green (0, 100, 0)
-            - ID text: Red (0, 0, 255) with white background
-            - Timer text: Deep blue (139, 0, 0) with white background
-            - Alert box: Red for alert, Green for normal
         """
         annotated = frame.copy()
         height, width = frame.shape[:2]
@@ -927,19 +905,17 @@ class CameraPeopleCountingSystem:
         try:
             # Calculate metrics
             total_people = len(people)
-            # Use the passed avg_dwell_time from metrics (includes dwell_60_time logic)
-            # NO LONGER calculating from people list here!
 
             # Convert average dwell time to HH:MM:SS format
             avg_dwell_hhmmss = seconds_to_hhmmss(avg_dwell_time)
 
-            # Determine if alert is active (based on status)
+            # Determine if alert is active
             is_alert = (status == "High Occupancy")
 
             # ===== Info Panel Section (Top) =====
             info_y_start = 30
             line_height = 35
-            total_lines = 3  # Reduced from 5
+            total_lines = 3
             font_scale = 0.8
             font_thickness = 2
             text_color = (255, 255, 255)  # White
@@ -950,63 +926,57 @@ class CameraPeopleCountingSystem:
             cv2.rectangle(overlay, (10, 10), (450, overlay_height), (50, 50, 50), -1)
             cv2.addWeighted(overlay, 0.7, annotated, 0.3, 0, annotated)
 
-            # Info texts with HH:MM:SS format and 60min window note
+            # Updated info texts (Entry/Exit removed, Occupancy added)
             info_texts = [
                 f"Total People: {total_people}",
-                f"Avg Dwell Time (60min): {avg_dwell_hhmmss}",  # NEW: HH:MM:SS format with window indicator
-                f"Entry: {self.total_entries} | Exit: {self.total_exits}"
+                f"Avg Dwell Time (60min): {avg_dwell_hhmmss}",
+                f"Occupancy: {occupancy_percentage:.1f}%"
             ]
 
             for i, text in enumerate(info_texts):
                 y_pos = info_y_start + (i * line_height)
                 cv2.putText(annotated, text, (20, y_pos),
-                            cv2.FONT_HERSHEY_SIMPLEX, font_scale, text_color, font_thickness)
+                            cv2.FONT_HERSHEY_SIMPLEX, font_scale,
+                            text_color, font_thickness)
 
-            # ===== Occupancy & Alert Section (Below Other Info) =====
-            separator_y = info_y_start + (line_height * total_lines) + 10
-
-            # Draw separator line
-            cv2.line(annotated, (20, separator_y), (440, separator_y), (200, 200, 200), 2)
-
-            # Occupancy section start
-            occ_section_y = separator_y + 20
-
-            # Occupancy text
-            occupancy_text = f"Occupancy: {occupancy_percentage:.1f}%"
-            occ_font_scale = 1.0
-            occ_font_thickness = 2
-
-            cv2.putText(annotated, occupancy_text, (20, occ_section_y),
-                        cv2.FONT_HERSHEY_SIMPLEX, occ_font_scale, text_color, occ_font_thickness)
-
-            # Alert status box below occupancy (only show when alert is active)
+            # ===== Alert Section (below panel) =====
             if is_alert:
-                alert_y = occ_section_y + 40
+                alert_y = info_y_start + (line_height * total_lines) + 30
                 alert_text = "ALERT!"
                 alert_font_scale = 1.2
                 alert_font_thickness = 3
 
-                # Red box for alert
+                # Red alert box
                 alert_box_x1 = 20
                 alert_box_y1 = alert_y - 30
                 alert_box_x2 = 200
                 alert_box_y2 = alert_y + 10
 
-                alert_bg_color = (0, 0, 255)  # Red
-                alert_text_color = (255, 255, 255)  # White text
+                alert_bg_color = (0, 0, 255)
+                alert_text_color = (255, 255, 255)
 
-                # Draw alert status box
-                cv2.rectangle(annotated, (alert_box_x1, alert_box_y1), (alert_box_x2, alert_box_y2),
+                cv2.rectangle(annotated,
+                              (alert_box_x1, alert_box_y1),
+                              (alert_box_x2, alert_box_y2),
                               alert_bg_color, -1)
 
-                # Draw alert text centered in box
-                alert_text_size = cv2.getTextSize(alert_text, cv2.FONT_HERSHEY_SIMPLEX,
-                                                  alert_font_scale, alert_font_thickness)[0]
+                # Center text in box
+                alert_text_size = cv2.getTextSize(
+                    alert_text,
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    alert_font_scale,
+                    alert_font_thickness
+                )[0]
+
                 alert_text_x = alert_box_x1 + ((alert_box_x2 - alert_box_x1) - alert_text_size[0]) // 2
                 alert_text_y = alert_box_y1 + ((alert_box_y2 - alert_box_y1) + alert_text_size[1]) // 2
 
-                cv2.putText(annotated, alert_text, (alert_text_x, alert_text_y),
-                            cv2.FONT_HERSHEY_SIMPLEX, alert_font_scale, alert_text_color, alert_font_thickness)
+                cv2.putText(annotated, alert_text,
+                            (alert_text_x, alert_text_y),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            alert_font_scale,
+                            alert_text_color,
+                            alert_font_thickness)
 
             # ===== Draw bounding boxes and labels =====
             for person in people:
@@ -1026,40 +996,56 @@ class CameraPeopleCountingSystem:
                     deep_green = (0, 100, 0)
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), deep_green, 3)
 
-                    # Red ID text (centered in box)
+                    # Red ID text (centered)
                     red_color = (0, 0, 255)
                     id_text = f"ID: {person_id}"
 
-                    text_size = cv2.getTextSize(id_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
+                    text_size = cv2.getTextSize(id_text,
+                                                cv2.FONT_HERSHEY_SIMPLEX,
+                                                0.7, 2)[0]
+
                     text_x = x1 + (x2 - x1 - text_size[0]) // 2
                     text_y = y1 + (y2 - y1 + text_size[1]) // 2
 
                     text_x = max(x1 + 5, min(text_x, x2 - text_size[0] - 5))
                     text_y = max(y1 + text_size[1] + 5, min(text_y, y2 - 5))
 
-                    cv2.rectangle(annotated,
-                                  (text_x - 5, text_y - text_size[1] - 5),
-                                  (text_x + text_size[0] + 5, text_y + 5),
-                                  (255, 255, 255), -1)
+                    cv2.rectangle(
+                        annotated,
+                        (text_x - 5, text_y - text_size[1] - 5),
+                        (text_x + text_size[0] + 5, text_y + 5),
+                        (255, 255, 255),
+                        -1
+                    )
 
-                    cv2.putText(annotated, id_text, (text_x, text_y),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, red_color, 2)
+                    cv2.putText(annotated, id_text,
+                                (text_x, text_y),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, red_color, 2)
 
-                    # Deep blue timer in HH:MM:SS format (top of box)
+                    # Deep blue timer at top of box
                     deep_blue = (139, 0, 0)
-                    timer_text = seconds_to_hhmmss(dwell_time)  # NEW: HH:MM:SS format
+                    timer_text = seconds_to_hhmmss(dwell_time)
 
                     timer_y = max(y1 - 10, 25)
                     timer_x = x1
 
-                    timer_size = cv2.getTextSize(timer_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
-                    cv2.rectangle(annotated,
-                                  (timer_x - 2, timer_y - timer_size[1] - 5),
-                                  (timer_x + timer_size[0] + 2, timer_y + 5),
-                                  (255, 255, 255), -1)
+                    timer_size = cv2.getTextSize(timer_text,
+                                                 cv2.FONT_HERSHEY_SIMPLEX,
+                                                 0.6, 2)[0]
 
-                    cv2.putText(annotated, timer_text, (timer_x, timer_y),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, deep_blue, 2)
+                    cv2.rectangle(
+                        annotated,
+                        (timer_x - 2, timer_y - timer_size[1] - 5),
+                        (timer_x + timer_size[0] + 2, timer_y + 5),
+                        (255, 255, 255),
+                        -1
+                    )
+
+                    cv2.putText(annotated, timer_text,
+                                (timer_x, timer_y),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.6, deep_blue, 2)
 
                 except Exception as e:
                     logger.debug(f"Annotation failed for person {person.get('id', 'unknown')}: {e}")

@@ -323,8 +323,8 @@ class EnhancedTester:
 # Quick usage examples
 if __name__ == "__main__":
     # Configuration
-    MODEL_DIR = r"E:\UTC project\utc\cctv\CCTV_Project\Project_CCTV_arun\21Nov2025-People"
-    VIDEO_PATH = r"E:\UTC project\utc\cctv\CCTV_Project\Project_CCTV_arun\21Nov2025-People\Vid.mp4"
+    MODEL_DIR = r"E:\UTC project\CCTV_Project\Production_CCTV\people_model\src\local_models\people_gpu"
+    VIDEO_PATH = r"E:\UTC project\CCTV_Project\Video\Vid.mp4"
     #VIDEO_PATH = 0
     # Create tester
     tester = EnhancedTester(MODEL_DIR, output_dir="test_outputs")
