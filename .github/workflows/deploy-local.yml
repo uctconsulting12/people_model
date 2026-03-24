@@ -1,0 +1,24 @@
+on:
+  push:
+    branches: [ local ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t people_image .
+
+      - name: Restart container
+        run: |
+          docker stop people_container || true
+          docker rm people_container || true
+          docker run -d \
+            --name people_container \
+            -p 8002:8002 \
+            --gpus all \
+            people_image
