@@ -1,3 +1,5 @@
+name: Local Deploy to Self-Hosted
+
 on:
   push:
     branches: [ local ]
@@ -11,10 +13,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t people_image .
+        run: |
+          set -e
+          docker build --pull -t people_image .
+          docker image prune -f
 
       - name: Restart container
         run: |
+          set -e
           docker stop people_container || true
           docker rm people_container || true
           docker run -d \
