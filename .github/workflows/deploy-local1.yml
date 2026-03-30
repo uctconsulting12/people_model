@@ -1,0 +1,34 @@
+name: Local Deploy to Self-Hosted
+
+on:
+  push:
+    branches: [ local ]
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          set -e
+          docker build --pull --no-cache -t people_image .
+          docker system prune -f
+
+      - name: Restart container
+        run: |
+          set -e
+          docker stop people_container || true
+          docker rm people_container || true
+          docker run -d \
+            --name people_container \
+            --restart unless-stopped \
+            -p 8002:8002 \
+            --gpus all \
+            people_image
+
+      - name: Verify container
+        run: docker ps
