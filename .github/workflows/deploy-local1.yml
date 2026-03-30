@@ -3,6 +3,7 @@ name: Local Deploy to Self-Hosted
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -16,7 +17,7 @@ jobs:
         run: |
           set -e
           docker build --pull --no-cache -t people_image .
-          docker system prune -f
+          docker image prune -f
 
       - name: Restart container
         run: |
@@ -32,3 +33,6 @@ jobs:
 
       - name: Verify container
         run: docker ps
+
+      - name: Check logs
+        run: docker logs people_container
