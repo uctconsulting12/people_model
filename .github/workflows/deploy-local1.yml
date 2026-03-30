@@ -28,7 +28,6 @@ jobs:
             --name people_container \
             --restart unless-stopped \
             -p 8002:8002 \
-            --gpus all \
             people_image
 
       - name: Verify container
