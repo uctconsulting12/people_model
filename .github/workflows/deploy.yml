@@ -1,0 +1,48 @@
+name: Deploy to EC2 (Build on EC2)
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ubuntu
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+           
+            echo "---- Pulling latest code ----"
+
+            # Clone or update repo in ~/people_model
+            if [ ! -d ~/people_model ]; then
+              git clone https://github.com/uctconsulting12/people_model.git ~/people_model
+            else
+              cd ~/people_model
+              git pull origin main
+            fi
+
+            echo "---- Building Docker image ----"
+            cd ~/people_model
+            sudo docker build -t people_image .
+            echo "--- remove none images ------"
+            sudo docker image prune -f
+
+            echo "---- Stopping old container ----"
+            sudo docker stop people_container || true
+            sudo docker rm people_container || true
+
+            echo "---- Running new container with AWS creds ----"
+            sudo docker run -d \
+            --name people_container \
+            -p 8002:8002 \
+            --gpus all \
+            -v /home/ubuntu/.aws:/root/.aws \
+            people_image
+
+            echo "Deployment completed. "
